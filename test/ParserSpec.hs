@@ -104,3 +104,46 @@ spec =
                  [(-4,""),(3,"-(3+4)"),(1,"+2-(3+4)")]
                expr "1+3^2-(1+4)" `shouldBe`
                  [(5,""),(10,"-(1+4)"),(4,"^2-(1+4)"),(1,"+3^2-(1+4)")]
+     describe "Handling lexical issues" $
+       do describe "spaces" $
+            it "consumes white spaces from the beginning of input" $
+            spaces "  test" `shouldBe` [((),"test"),(()," test")]
+          describe "comment" $
+            do it "consumes single line comments" $
+                 comment "-- xxx" `shouldBe`
+                 [((),""),((),"x"),((),"xx"),((),"xxx"),(()," xxx")]
+               it "consumes multiline comments" $
+                 comment "{- x\n  x -} rest = 1" `shouldBe` [(()," rest = 1")]
+          describe "junk" $
+            it "discards spaces and comments" $
+            junk "-- xxx \n {- xx -} x = 2" `shouldBe`
+            [((),"x = 2")
+            ,(()," x = 2")
+            ,((),"{- xx -} x = 2")
+            ,((),"\n {- xx -} x = 2")
+            ,((),"-- xxx \n {- xx -} x = 2")]
+          describe "tokens" $
+            do it "parses a natural number" $
+                 natural "1 -- test" `shouldBe`
+                 [(1,""),(1,"-- test"),(1," -- test")]
+               it "parses an integer" $
+                 integer "-1 -- test" `shouldBe`
+                 [(-1,""),(-1,"-- test"),(-1," -- test")]
+               it "parses a symbol" $
+                 symbol "var" "var x = 1" `shouldBe`
+                 [("var","x = 1"),("var"," x = 1")]
+               it "will not parse as identifier a reserved keyword" $
+                 identifier ["var"]
+                            "var x = 1" `shouldBe`
+                 [("","x = 1"),(""," x = 1"),("va","r x = 1"),("v","ar x = 1")]
+               it "will parse an identifier that is not a reserved keyword" $
+                 identifier ["var"]
+                            "x = 1" `shouldBe`
+                 [("x","= 1"),("x"," = 1")]
+          describe "parser for lambda expressions" $
+            it "parses an expression" $
+            lambdaExpr "\\x -> succ x" `shouldBe`
+            [(Lam "x"
+                  (App (Var "succ")
+                       (Var "x"))
+             ,"")]

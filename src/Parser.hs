@@ -32,17 +32,21 @@ p `sepby1` sep =
 sepby :: Parser a -> Parser b -> Parser [a]
 p `sepby` sep = (p `sepby1` sep) `plus` result []
 
-chainl :: Parser a -> Parser (a -> a -> a) -> a -> Parser a
+chainl
+  :: Parser a -> Parser (a -> a -> a) -> a -> Parser a
 chainl p op v = (p `chainl1` op) `plus` result v
 
-chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+chainl1
+  :: Parser a -> Parser (a -> a -> a) -> Parser a
 p `chainl1` op = p `bind` rest
   where rest x = (op `bind` \f -> p `bind` \y -> rest (f x y)) `plus` result x
 
-chainr :: Parser a -> Parser (a -> a -> a) -> a -> Parser a
+chainr
+  :: Parser a -> Parser (a -> a -> a) -> a -> Parser a
 chainr p op v = (p `chainr1` op) `plus` result v
 
-chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+chainr1
+  :: Parser a -> Parser (a -> a -> a) -> Parser a
 p `chainr1` op =
   p `bind`
   \x ->
@@ -51,13 +55,17 @@ p `chainr1` op =
 
 -- force increases laziness
 force :: Parser a -> Parser a
-force p = \inp -> let x = p inp in
-                  (fst (head x), snd (head x)) : tail x
+force p =
+  \inp ->
+    let x = p inp
+    in (fst (head x),snd (head x)) : tail x
 
 first :: Parser a -> Parser a
-first p = \inp -> case p inp of
-    [] -> []
-    (x:xs) -> [x] -- pattern match instead of take to prevent space leak
+first p =
+  \inp ->
+    case p inp of
+      [] -> []
+      (x:xs) -> [x] -- pattern match instead of take to prevent space leak
 
 (+++) :: Parser a -> Parser a -> Parser a
 p +++ q = first (p `plus` q)
@@ -119,7 +127,8 @@ int :: Parser Int
 int = parseInteger `plus` nat
   where parseInteger = char '-' `bind` \_ -> nat `bind` \n -> result (negate n)
 
-bracket :: Parser a -> Parser b -> Parser c -> Parser b
+bracket
+  :: Parser a -> Parser b -> Parser c -> Parser b
 bracket open p close =
   open `bind` \_ -> p `bind` \x -> close `bind` \_ -> result x
 
@@ -136,7 +145,6 @@ ints =
 -- expop    ::= ^
 -- factor   ::= nat | ( expr )
 -- expop has precedence over addop
-
 expr :: Parser Int
 expr = term `chainl1` addop
 
@@ -158,3 +166,88 @@ factor =
   bracket (char '(')
           expr
           (char ')')
+
+---- Lexical issues ------------------------------------------------
+spaces :: Parser ()
+spaces = many1 (sat isSpace) `bind` \_ -> result ()
+
+comment :: Parser ()
+comment = singleLineComment `plus` multilineComments
+
+singleLineComment :: Parser ()
+singleLineComment =
+  string "--" `bind` \_ -> many (sat (\x -> x /= '\n')) `bind` \_ -> result ()
+
+multilineComments :: Parser ()
+multilineComments =
+  string "{-" `bind`
+  \_ ->
+    many (sat (\x -> isSpace x || isPrint x)) `bind`
+    \_ ->
+      --many (alphanum `plus` char ' ' `plus` char '\n') `bind` \_ ->
+      string "-}" `bind`
+      \_ -> result ()
+
+junk :: Parser ()
+junk = many (spaces +++ comment) `bind` \_ -> result ()
+
+parse :: Parser a -> Parser a
+parse p = junk `bind` \_ -> p `bind` \v -> result v
+
+token :: Parser a -> Parser a
+token p = p `bind` \v -> junk `bind` \_ -> result v
+
+natural :: Parser Int
+natural = token nat
+
+integer :: Parser Int
+integer = token int
+
+symbol :: String -> Parser String
+symbol xs = token (string xs)
+
+identifier :: [String] -> Parser String
+identifier ks =
+  token (ident `bind`
+         \xs ->
+           if xs `notElem` ks
+              then result xs
+              else result "")
+
+----- A parser for λ-expressions ------------------------------------
+data Expr = App Expr Expr           -- applications
+          | Lam String Expr         -- lambda abstraction
+          | Let String Expr Expr    -- local definition
+          | Var String              -- variable
+          deriving (Show,Eq)
+
+lambdaExpr :: Parser Expr
+lambdaExpr = atom `chainl1` result App
+
+atom = lam +++ local +++ var +++ paren
+
+lam =
+  symbol "\\" `bind`
+  \_ ->
+    variable `bind`
+    \x -> symbol "->" `bind` \_ -> lambdaExpr `bind` \e -> result (Lam x e)
+
+local =
+  symbol "let" `bind`
+  \_ ->
+    variable `bind`
+    \x ->
+      symbol "=" `bind`
+      \_ ->
+        lambdaExpr `bind`
+        \e ->
+          symbol "in" `bind` \_ -> lambdaExpr `bind` \e' -> result (Let x e e')
+
+var = variable `bind` \x -> result (Var x)
+
+paren =
+  bracket (symbol "(")
+          lambdaExpr
+          (symbol ")")
+
+variable = identifier ["let","in"]
