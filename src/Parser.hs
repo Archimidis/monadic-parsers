@@ -19,7 +19,7 @@ p `plus` q = \inp -> (p inp ++ q inp)
 
 ----- General combinators -------------------------------------------
 many :: Parser a -> Parser [a]
-many p = neWord `plus` result []
+many p = force (neWord `plus` result [])
   where neWord = p `bind` \x -> many p `bind` \xs -> result (x : xs)
 
 many1 :: Parser a -> Parser [a]
@@ -48,6 +48,19 @@ p `chainr1` op =
   \x ->
     (op `bind` \f -> (p `chainl1` op) `bind` \y -> result (f x y)) `plus`
     result x
+
+-- force increases laziness
+force :: Parser a -> Parser a
+force p = \inp -> let x = p inp in
+                  (fst (head x), snd (head x)) : tail x
+
+first :: Parser a -> Parser a
+first p = \inp -> case p inp of
+    [] -> []
+    (x:xs) -> [x] -- pattern match instead of take to prevent space leak
+
+(+++) :: Parser a -> Parser a -> Parser a
+p +++ q = first (p `plus` q)
 
 ----- Parsers -------------------------------------------------------
 item :: Parser Char
